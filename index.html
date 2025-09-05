@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>6‑Slice Image Splitter</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    body {
+      font-family: sans-serif;
+      background: #0f0f10;
+      color: #e6e6e6;
+      margin: 0;
+      padding: 1.5rem;
+      line-height: 1.5;
+    }
+    h1 {
+      margin-top: 0;
+      margin-bottom: 1rem;
+      font-size: 1.75rem;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+      align-items: center;
+    }
+    .controls label {
+      font-size: 0.875rem;
+    }
+    .controls input {
+      background: #1f1f21;
+      color: #e6e6e6;
+      border: 1px solid #2e2e33;
+      border-radius: 4px;
+      padding: 0.25rem 0.5rem;
+    }
+    .controls button {
+      background: #3b82f6;
+      color: #ffffff;
+      border: none;
+      border-radius: 4px;
+      padding: 0.5rem 0.75rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .controls button:hover {
+      background: #2563eb;
+    }
+    #output {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    #output canvas {
+      background: #1f1f21;
+      border: 1px solid #2e2e33;
+      border-radius: 4px;
+      max-width: 100%;
+      height: auto;
+      cursor: pointer;
+    }
+    .notice {
+      font-size: 0.875rem;
+      color: #9ca3af;
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>6‑Slice Image Splitter</h1>
+  <div class="controls">
+    <label for="imageInput">Select image:</label>
+    <input type="file" id="imageInput" accept="image/*">
+    <label for="cols">Columns:</label>
+    <input type="number" id="cols" min="1" value="2">
+    <label for="rows">Rows:</label>
+    <input type="number" id="rows" min="1" value="3">
+    <label for="vSeam">Vertical seam px:</label>
+    <input type="number" id="vSeam" min="0" value="0">
+    <label for="hSeam">Horizontal seam px:</label>
+    <input type="number" id="hSeam" min="0" value="0">
+    <label for="resize">Resize px (optional):</label>
+    <input type="number" id="resize" min="0" placeholder="e.g. 1024">
+    <button id="splitBtn">Split</button>
+    <button id="downloadZipBtn">Download ZIP</button>
+  </div>
+  <div class="notice">
+    Click on an individual slice to download it. Use the ZIP button to download all slices together.
+  </div>
+  <div id="output"></div>
+
+  <!-- JSZip library for creating zip files -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script>
+    const imageInput = document.getElementById('imageInput');
+    const colsInput = document.getElementById('cols');
+    const rowsInput = document.getElementById('rows');
+    const vSeamInput = document.getElementById('vSeam');
+    const hSeamInput = document.getElementById('hSeam');
+    const resizeInput = document.getElementById('resize');
+    const splitBtn = document.getElementById('splitBtn');
+    const downloadZipBtn = document.getElementById('downloadZipBtn');
+    const output = document.getElementById('output');
+    let canvases = [];
+
+    // Split the image into tiles and render canvases
+    splitBtn.addEventListener('click', () => {
+      const file = imageInput.files[0];
+      if (!file) {
+        alert('Please choose an image first.');
+        return;
+      }
+      const cols = parseInt(colsInput.value) || 1;
+      const rows = parseInt(rowsInput.value) || 1;
+      const vSeam = parseInt(vSeamInput.value) || 0;
+      const hSeam = parseInt(hSeamInput.value) || 0;
+      const resize = parseInt(resizeInput.value) || 0;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const tileWidth = Math.floor(img.width / cols);
+          const tileHeight = Math.floor(img.height / rows);
+          output.innerHTML = '';
+          canvases = [];
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              const srcX = c * tileWidth;
+              const srcY = r * tileHeight;
+              const drawWidth = tileWidth - vSeam;
+              const drawHeight = tileHeight - hSeam;
+              const canvas = document.createElement('canvas');
+              const targetSize = resize > 0 ? resize : 0;
+              canvas.width = targetSize || drawWidth;
+              canvas.height = targetSize || drawHeight;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(
+                img,
+                srcX,
+                srcY,
+                drawWidth,
+                drawHeight,
+                0,
+                0,
+                canvas.width,
+                canvas.height
+              );
+              output.appendChild(canvas);
+              canvases.push(canvas);
+              // Click to download individual slice
+              canvas.addEventListener('click', () => {
+                canvas.toBlob(blob => {
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = `slice_${r * cols + c + 1}.png`;
+                  link.click();
+                  URL.revokeObjectURL(url);
+                }, 'image/png');
+              });
+            }
+          }
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Download all canvases as a zip file
+    downloadZipBtn.addEventListener('click', async () => {
+      if (!canvases.length) {
+        alert('No slices to download. Please split an image first.');
+        return;
+      }
+      const zip = new JSZip();
+      for (let i = 0; i < canvases.length; i++) {
+        const canvas = canvases[i];
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        zip.file(`slice_${(i + 1).toString().padStart(3, '0')}.png`, blob);
+      }
+      const content = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(content);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'slices.zip';
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>

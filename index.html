@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>6‑Slice Image Splitter</title>
+  <!-- Generic title since the splitter now supports variable grid sizes -->
+  <title>Image Splitter</title>
   <style>
     :root {
       color-scheme: dark;
@@ -71,14 +72,17 @@
   </style>
 </head>
 <body>
-  <h1>6‑Slice Image Splitter</h1>
+  <h1>Image Splitter</h1>
   <div class="controls">
     <label for="imageInput">Select image:</label>
-    <input type="file" id="imageInput" accept="image/*">
+    <!-- Allow multiple file selection -->
+    <input type="file" id="imageInput" accept="image/*" multiple>
     <label for="cols">Columns:</label>
-    <input type="number" id="cols" min="1" value="2">
+    <!-- Default to 3 columns for 12‑penguin images -->
+    <input type="number" id="cols" min="1" value="3">
     <label for="rows">Rows:</label>
-    <input type="number" id="rows" min="1" value="3">
+    <!-- Default to 4 rows for 12‑penguin images -->
+    <input type="number" id="rows" min="1" value="4">
     <label for="vSeam">Vertical seam px:</label>
     <input type="number" id="vSeam" min="0" value="0">
     <label for="hSeam">Horizontal seam px:</label>
@@ -107,11 +111,11 @@
     const output = document.getElementById('output');
     let canvases = [];
 
-    // Split the image into tiles and render canvases
-    splitBtn.addEventListener('click', () => {
-      const file = imageInput.files[0];
-      if (!file) {
-        alert('Please choose an image first.');
+    // Split one or more images into tiles and render canvases
+    splitBtn.addEventListener('click', async () => {
+      const files = imageInput.files;
+      if (!files || !files.length) {
+        alert('Please choose at least one image first.');
         return;
       }
       const cols = parseInt(colsInput.value) || 1;
@@ -119,55 +123,62 @@
       const vSeam = parseInt(vSeamInput.value) || 0;
       const hSeam = parseInt(hSeamInput.value) || 0;
       const resize = parseInt(resizeInput.value) || 0;
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const tileWidth = Math.floor(img.width / cols);
-          const tileHeight = Math.floor(img.height / rows);
-          output.innerHTML = '';
-          canvases = [];
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              const srcX = c * tileWidth;
-              const srcY = r * tileHeight;
-              const drawWidth = tileWidth - vSeam;
-              const drawHeight = tileHeight - hSeam;
-              const canvas = document.createElement('canvas');
-              const targetSize = resize > 0 ? resize : 0;
-              canvas.width = targetSize || drawWidth;
-              canvas.height = targetSize || drawHeight;
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(
-                img,
-                srcX,
-                srcY,
-                drawWidth,
-                drawHeight,
-                0,
-                0,
-                canvas.width,
-                canvas.height
-              );
-              output.appendChild(canvas);
-              canvases.push(canvas);
-              // Click to download individual slice
-              canvas.addEventListener('click', () => {
-                canvas.toBlob(blob => {
-                  const url = URL.createObjectURL(blob);
-                  const link = document.createElement('a');
-                  link.href = url;
-                  link.download = `slice_${r * cols + c + 1}.png`;
-                  link.click();
-                  URL.revokeObjectURL(url);
-                }, 'image/png');
-              });
-            }
-          }
-        };
-        img.src = e.target.result;
-      };
-      reader.readAsDataURL(file);
+      // Clear previous output
+      output.innerHTML = '';
+      canvases = [];
+      // Process each selected file sequentially
+      for (const file of files) {
+        await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+              const tileWidth = Math.floor(img.width / cols);
+              const tileHeight = Math.floor(img.height / rows);
+              for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                  const srcX = c * tileWidth;
+                  const srcY = r * tileHeight;
+                  const drawWidth = tileWidth - vSeam;
+                  const drawHeight = tileHeight - hSeam;
+                  const canvas = document.createElement('canvas');
+                  const targetSize = resize > 0 ? resize : 0;
+                  canvas.width = targetSize || drawWidth;
+                  canvas.height = targetSize || drawHeight;
+                  const ctx = canvas.getContext('2d');
+                  ctx.drawImage(
+                    img,
+                    srcX,
+                    srcY,
+                    drawWidth,
+                    drawHeight,
+                    0,
+                    0,
+                    canvas.width,
+                    canvas.height
+                  );
+                  output.appendChild(canvas);
+                  canvases.push({ canvas, baseName: file.name.replace(/\.[^/.]+$/, '') , index: r * cols + c + 1 });
+                  // Click to download individual slice with filename including base name
+                  canvas.addEventListener('click', () => {
+                    canvas.toBlob((blob) => {
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement('a');
+                      link.href = url;
+                      link.download = `${file.name.replace(/\.[^/.]+$/, '')}_slice_${(r * cols + c + 1).toString().padStart(3, '0')}.png`;
+                      link.click();
+                      URL.revokeObjectURL(url);
+                    }, 'image/png');
+                  });
+                }
+              }
+              resolve();
+            };
+            img.src = e.target.result;
+          };
+          reader.readAsDataURL(file);
+        });
+      }
     });
 
     // Download all canvases as a zip file
@@ -178,9 +189,10 @@
       }
       const zip = new JSZip();
       for (let i = 0; i < canvases.length; i++) {
-        const canvas = canvases[i];
-        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-        zip.file(`slice_${(i + 1).toString().padStart(3, '0')}.png`, blob);
+        const { canvas, baseName, index } = canvases[i];
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+        const filename = `${baseName}_slice_${index.toString().padStart(3, '0')}.png`;
+        zip.file(filename, blob);
       }
       const content = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(content);
